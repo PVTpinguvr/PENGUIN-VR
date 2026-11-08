@@ -75,13 +75,100 @@ $('#saveProfile').onclick=()=>{const n=$('#playerName').value.trim().slice(0,18)
 $('#ownerTools').onclick=()=>notify('Owner tools are locked until the first-ever owner is verified by the secure online server.');$('#volume').oninput=e=>save.volume=Number(e.target.value);$('#sensitivity').oninput=e=>{save.sensitivity=Number(e.target.value);persist()};$('#resetData').onclick=()=>{if(confirm('Delete your local PENGUIN VR save?')){localStorage.removeItem('penguinVRSave');location.reload()}};
 // Round simulation
 function distance(a,b){return a.position.distanceTo(b.position)}function finishRound(msg){if(!round||round.ended)return;round.ended=true;round.active=false;$('#gameDescription').textContent=msg;$('#gameTimer').textContent='ROUND COMPLETE';save.xp+=Math.max(10,gameScore*2+20);save.coins+=Math.max(15,gameScore*3+25);save.level=Math.floor(save.xp/100)+1;persist();notify('Round rewards added to your locker!')}
+
+/* IN-WORLD VR LOBBY: all menus live on 3D objects, not screen overlays. */
+document.body.classList.add('world-ui-only');
+const worldStyle=document.createElement('style');
+worldStyle.textContent=`
+#panel,#nav,.hud,#hint,#toast,#status,#brand,.mobile-controls{display:none!important}
+body.vr-active #vrGate{display:none!important}
+body.vr-active #vrButton{display:none!important}
+`;
+document.head.appendChild(worldStyle);
+function worldText(title,subtitle=''){
+ const c=document.createElement('canvas');c.width=768;c.height=320;const x=c.getContext('2d');
+ x.fillStyle='#101a35';x.fillRect(0,0,c.width,c.height);x.strokeStyle='#9bdcff';x.lineWidth=8;x.strokeRect(8,8,c.width-16,c.height-16);
+ x.textAlign='center';x.fillStyle='#ffffff';x.font='bold 54px system-ui';x.fillText(title,384,132);
+ x.fillStyle='#bfeaff';x.font='28px system-ui';x.fillText(subtitle,384,196);
+ const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;
+ return new THREE.MeshBasicMaterial({map:tex,transparent:false});
+}
+function signBoard(title,subtitle,pos,w=4,h=1.6){
+ const mesh=new THREE.Mesh(new THREE.PlaneGeometry(w,h),worldText(title,subtitle));mesh.position.copy(pos);scene.add(mesh);return mesh;
+}
+const portalDefs=[
+ {map:'ice',name:'FROZEN ISLAND',sub:'TAG · RACE · SOCIAL',pos:new THREE.Vector3(-10,2,-12),color:0x6bdcff},
+ {map:'cove',name:'PENGUIN COVE',sub:'HIDE & SEEK · INFECTION',pos:new THREE.Vector3(0,2,-19),color:0x43d8c5},
+ {map:'summit',name:'SNOWY SUMMIT',sub:'KING OF THE ICE · RACE',pos:new THREE.Vector3(10,2,-12),color:0xffffff},
+ {map:'night',name:'AURORA NIGHT',sub:'TAG · SOCIAL · EVENTS',pos:new THREE.Vector3(0,2,13),color:0x9a8cff}
+];
+const worldPortals=[];
+for(const d of portalDefs){
+ const ring=new THREE.Mesh(new THREE.TorusGeometry(1.65,.16,12,48),new THREE.MeshStandardMaterial({color:d.color,emissive:d.color,emissiveIntensity:1.3,roughness:.25}));
+ ring.position.copy(d.pos);ring.rotation.y=Math.PI;scene.add(ring);
+ const base=new THREE.Mesh(new THREE.CylinderGeometry(1.55,1.7,.22,40),mat(0x8ec9e8));base.position.set(d.pos.x,.12,d.pos.z);scene.add(base);
+ const sign=signBoard(d.name,d.sub,new THREE.Vector3(d.pos.x,d.pos.y+2.25,d.pos.z),4.5,1.5);sign.rotation.y=Math.PI;
+ worldPortals.push({...d,ring,inside:false});
+}
+signBoard('PENGUIN PLAZA','WALK TO A GATE TO JOIN THAT MAP',new THREE.Vector3(0,4,0),7,1.7);
+const boardFrame=new THREE.Mesh(new THREE.BoxGeometry(4.8,3.1,.22),mat(0x233b61));boardFrame.position.set(-5,2,-5);scene.add(boardFrame);
+const leaderboard=signBoard('TOP PENGUINS','LOCAL PREVIEW · ONLINE SCORES NOT CONNECTED',new THREE.Vector3(-5,2,-4.86),4.5,2.8);
+const computerBase=new THREE.Mesh(new THREE.BoxGeometry(2.8,1.2,1.4),mat(0x344b70));computerBase.position.set(5,.62,-5);scene.add(computerBase);
+const computerScreen=new THREE.Mesh(new THREE.PlaneGeometry(2.5,1.55),worldText('LOBBY COMPUTER','POINT A FLIPPER + PRESS TRIGGER'));computerScreen.position.set(5,1.85,-5.72);scene.add(computerScreen);
+const computerButtons=[];
+const modeOptions=[['TAG','tag'],['HIDE & SEEK','hide'],['INFECTION','infection'],['KING OF ICE','king'],['ICEBERG RACE','race'],['SNOWBALL PAINT','paint']];
+modeOptions.forEach((o,i)=>{
+ const col=i%3,row=Math.floor(i/3),x=4+col*1.05,z=-4.3+row*.9;
+ const b=new THREE.Mesh(new THREE.BoxGeometry(.9,.18,.65),new THREE.MeshStandardMaterial({color:0x536f9f,emissive:0x172d55}));
+ b.position.set(x,.22,z);b.userData.mode=o[1];scene.add(b);computerButtons.push(b);
+ const s=signBoard(o[0],'SELECT MODE',new THREE.Vector3(x,.75,z),1.15,.42);s.rotation.x=-.18;
+});
+const boardEntries=['1  ICEKING     2450','2  PINGU       1980','3  SNOWFLAKE   1760','4  FROSTY      1520','5  WADDLES     1200'];
+const boardCanvas=document.createElement('canvas');boardCanvas.width=768;boardCanvas.height=512;
+function drawBoard(){
+ const c=boardCanvas.getContext('2d');c.fillStyle='#101a35';c.fillRect(0,0,768,512);c.fillStyle='#fff';c.font='bold 48px system-ui';c.fillText('LEADERBOARD',40,68);
+ c.font='30px system-ui';c.fillStyle='#c7e9ff';boardEntries.forEach((v,i)=>c.fillText(v,45,140+i*66));
+ c.font='20px system-ui';c.fillStyle='#8fb4d9';c.fillText('LOCAL DEMO SCORES — LIVE SERVER REQUIRED',40,470);
+ const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;leaderboard.material.map=tex;leaderboard.material.needsUpdate=true;
+}
+drawBoard();
+const raycaster=new THREE.Raycaster(),controllerRays=controllers.map(()=>new THREE.Group());
+controllers.forEach((controller,i)=>{
+ const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(0,0,-5)]),new THREE.LineBasicMaterial({color:0x9eeaff}));
+ controller.add(line);controller.userData.ray=line;
+ controller.addEventListener('select',()=>{
+  if(!renderer.xr.isPresenting)return;
+  const origin=new THREE.Vector3(),direction=new THREE.Vector3(0,0,-1);
+  controller.getWorldPosition(origin);direction.applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion()));
+  raycaster.set(origin,direction);
+  const hit=raycaster.intersectObjects(computerButtons,false)[0];
+  if(hit){const m=hit.object.userData.mode;startMode(m);inWorldMode=m;computerScreen.material=worldText('MODE: '+m.toUpperCase(),'WALK THROUGH A MAP GATE TO ENTER');}
+ });
+});
+let inWorldMode='lobby',lastPortalJoin=0;
+function updateWorldLobby(dt,xr){
+ if(!xr)return;
+ const p=xrRig.position;
+ for(const gate of worldPortals){
+  const near=Math.hypot(p.x-gate.pos.x,p.z-gate.pos.z)<1.55;
+  gate.ring.material.emissiveIntensity=near?2.4:1.1;
+  if(near&&!gate.inside&&performance.now()-lastPortalJoin>1800){
+   gate.inside=true;lastPortalJoin=performance.now();
+   setMap(gate.map);startMode('lobby');inWorldMode='lobby';
+   computerScreen.material=worldText(gate.name,'PUBLIC MATCHMAKING PLACEHOLDER · SERVER NOT LIVE');
+   computerScreen.material.needsUpdate=true;
+  }
+  if(!near)gate.inside=false;
+ }
+}
+
 const clock=new THREE.Clock();function animate(){const dt=Math.min(clock.getDelta(),.04),t=clock.elapsedTime,xr=renderer.xr.isPresenting;
  if(!xr){player.visible=false;$('#status').textContent='VR REQUIRED · ENTER IMMERSIVE MODE';}else{player.visible=true;const head=renderer.xr.getCamera(camera),dir=new THREE.Vector3();head.getWorldDirection(dir);yaw=Math.atan2(-dir.x,-dir.z);const handNow=grips.map(g=>{const p=new THREE.Vector3();g.getWorldPosition(p);return p});if(!handsReady){handNow.forEach((p,i)=>previousHands[i].copy(p));handsReady=true}else{for(let i=0;i<handNow.length;i++){const p=handNow[i],prev=previousHands[i];const touchingIce=p.y<.38||prev.y<.38;if(touchingIce){const push=prev.clone().sub(p);push.multiplyScalar(1.12);xrRig.position.add(push)}prev.copy(p)}}xrRig.position.x=THREE.MathUtils.clamp(xrRig.position.x,-29,29);xrRig.position.z=THREE.MathUtils.clamp(xrRig.position.z,-29,29);player.position.copy(xrRig.position);player.position.y=0;player.rotation.y=yaw;}
  player.position.x=THREE.MathUtils.clamp(player.position.x,-29,29);player.position.z=THREE.MathUtils.clamp(player.position.z,-29,29);
  for(const b of bots){b.phase+=dt*b.speed;if(round?.active&&['tag','hide','infection'].includes(mode)&&b.role==='seeker'&&distance(b.mesh,player)<13){const d=player.position.clone().sub(b.mesh.position);d.y=0;if(d.lengthSq()>.01){d.normalize();b.mesh.position.addScaledVector(d,dt*(mode==='infection'?2.5:2.1));b.mesh.rotation.y=Math.atan2(-d.x,-d.z)}}else if(round?.active&&mode==='tag'&&b.role==='wander'){b.mesh.position.x+=Math.sin(b.phase)*dt*.3;b.mesh.position.z+=Math.cos(b.phase*.7)*dt*.25}else{b.mesh.position.x+=Math.sin(b.phase)*dt*.35;b.mesh.position.z+=Math.cos(b.phase*.7)*dt*.3}b.mesh.position.x=THREE.MathUtils.clamp(b.mesh.position.x,-30,30);b.mesh.position.z=THREE.MathUtils.clamp(b.mesh.position.z,-30,30);b.mesh.rotation.y+=dt*.1;}
  for(let i=snowballs.length-1;i>=0;i--){const s=snowballs[i];s.life-=dt;s.vel.y-=9.8*dt;s.mesh.position.addScaledVector(s.vel,dt);let hit=false;for(const b of bots)if(s.mesh.position.distanceTo(b.mesh.position.clone().add(new THREE.Vector3(0,1,0)))<.75){hit=true;paintHits++;gameScore++;$('#gameScore').textContent=gameScore;notify('Snowball hit! +1');break}if(s.life<=0||hit){scene.remove(s.mesh);snowballs.splice(i,1)}}
  if(round?.active&&!round.ended){round.elapsed+=dt;gameTime=Math.max(0,90-round.elapsed);$('#gameTimer').textContent=Math.ceil(gameTime)+' seconds left';if(mode==='king'&&Math.hypot(player.position.x,player.position.z+8)<3.2){round.king+=dt;gameScore=Math.floor(round.king*2);$('#gameScore').textContent=gameScore}if(mode==='race'&&player.position.distanceTo(checkpoints[checkpoint].position)<1.6){checkpoints[checkpoint].visible=false;checkpoint++;gameScore=checkpoint;$('#gameScore').textContent=gameScore;if(checkpoint<checkpoints.length)checkpoints[checkpoint].visible=true;else finishRound('You completed the iceberg race!')}if(['tag','hide','infection'].includes(mode)){const seeker=bots.find(b=>b.role==='seeker'||b.role==='infected');if(seeker&&distance(seeker.mesh,player)<.85){if(mode==='tag')finishRound('You were tagged! Try again and avoid the seeker.');else if(mode==='hide')finishRound('The seekers found you! Try hiding for longer.');else finishRound('You were infected! The colony got you.')}}if(gameTime<=0&&!round.ended)finishRound(mode==='king'?'Time up! Your ring score: '+gameScore:'You survived the round! Great job.')}
- player.userData.wings.forEach((w,i)=>{w.rotation.z=(i===0?-.28:.28)+Math.sin(t*7+(i* Math.PI))*0.12});if(!xr)$('#status').textContent='VR REQUIRED';else $('#status').textContent='QUEST VR · IMMERSIVE';renderer.render(scene,camera)}renderer.setAnimationLoop(animate);
+ updateWorldLobby(dt,xr);player.userData.wings.forEach((w,i)=>{w.rotation.z=(i===0?-.28:.28)+Math.sin(t*7+(i* Math.PI))*0.12});if(!xr)$('#status').textContent='VR REQUIRED';else $('#status').textContent='QUEST VR · IMMERSIVE';renderer.render(scene,camera)}renderer.setAnimationLoop(animate);
 const vr=VRButton.createButton(renderer);vr.id='vrButton';vr.textContent='ENTER QUEST VR';document.body.appendChild(vr);
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
 if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
