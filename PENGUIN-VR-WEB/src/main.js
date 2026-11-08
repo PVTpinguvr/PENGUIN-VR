@@ -235,37 +235,54 @@ controllers.forEach(c=>{c.addEventListener('squeezestart',()=>setPushToTalk(true
 
 const clock=new THREE.Clock();function animate(){const dt=Math.min(clock.getDelta(),.04),t=clock.elapsedTime,xr=renderer.xr.isPresenting;
  if(!xr){player.visible=false;$('#status').textContent='VR REQUIRED · ENTER IMMERSIVE MODE';}else{player.visible=true;const head=renderer.xr.getCamera(camera),dir=new THREE.Vector3();head.getWorldDirection(dir);yaw=Math.atan2(-dir.x,-dir.z);// Keep hand history in rig-local space so moving the player rig does not cancel the hand stroke.
- const handNow=grips.map(g=>{const p=new THREE.Vector3();g.getWorldPosition(p);xrRig.worldToLocal(p);return p});
+ const handNow=controllers.map(c=>{const p=new THREE.Vector3();c.getWorldPosition(p);xrRig.worldToLocal(p);return p});
  if(!handsReady){handNow.forEach((p,i)=>previousHands[i].copy(p));handsReady=true}
  else{
   const pushSum=new THREE.Vector3();let contacts=0;
   for(let i=0;i<handNow.length;i++){
-   const p=handNow[i],prev=previousHands[i],delta=prev.clone().sub(p);
-   // Hands push against the ice when they are near floor level; side boundaries act as walls.
-   const worldHand=p.clone().applyMatrix4(xrRig.matrixWorld);
-   const touchingFloor=p.y<.62;
-   const touchingWall=Math.abs(worldHand.x)>28.5||Math.abs(worldHand.z)>28.5;
+   const p=handNow[i],prev=previousHands[i],stroke=prev.clone().sub(p);
+   const strokeLength=stroke.length();
+   const worldNow=p.clone().applyMatrix4(xrRig.matrixWorld);
+   const worldPrev=prev.clone().applyMatrix4(xrRig.matrixWorld);
+   // Floor contact: only count a hand stroke while the tracked hand is close to the floor.
+   const touchingFloor=p.y<.68;
+   // Wall/obstacle contact: detect a controller stroke crossing a solid scene mesh.
+   let touchingWall=false;
+   if(strokeLength>.012){
+    const travel=worldNow.clone().sub(worldPrev),travelLength=travel.length();
+    raycaster.set(worldPrev,travel.normalize());
+    raycaster.far=travelLength+.10;
+    const hits=raycaster.intersectObjects(scene.children,true);
+    touchingWall=hits.some(h=>h.object!==floor&&h.object!==pond&&!player.children.includes(h.object)&&!bots.some(b=>b.mesh===h.object||b.mesh.children.includes(h.object))&&h.distance<=travelLength+.08);
+   }
    if(touchingFloor||touchingWall){
-    const push=delta.applyQuaternion(xrRig.quaternion);
-    pushSum.add(push);contacts++;handContact[i]=true;
+    const push=stroke.applyQuaternion(xrRig.quaternion);
+    // A hand must actually move before it can push the player.
+    if(push.length()>.008){pushSum.add(push);contacts++;handContact[i]=true;}
    }else handContact[i]=false;
    previousHands[i].copy(p);
   }
   if(contacts){
-   // Convert tracked hand displacement into a frame-rate-independent player impulse.
-   locomotionVelocity.addScaledVector(pushSum,0.9/dt);
+   locomotionVelocity.addScaledVector(pushSum,1.35/dt);
    const horizontal=Math.hypot(locomotionVelocity.x,locomotionVelocity.z);
-   if(horizontal>8){locomotionVelocity.x*=8/horizontal;locomotionVelocity.z*=8/horizontal}
-   locomotionVelocity.y=THREE.MathUtils.clamp(locomotionVelocity.y,-7,7);
+   if(horizontal>9){locomotionVelocity.x*=9/horizontal;locomotionVelocity.z*=9/horizontal}
+   locomotionVelocity.y=THREE.MathUtils.clamp(locomotionVelocity.y,-8,8);
   }
  }
- // Gravity, momentum, ground response and friction.
+ // Gravity and momentum. The rig, headset, and tracked controllers move together.
  locomotionVelocity.y-=9.8*dt;
- xrRig.position.addScaledVector(locomotionVelocity,dt);
- if(xrRig.position.y<0){xrRig.position.y=0;if(locomotionVelocity.y<0)locomotionVelocity.y=0;grounded=true}else grounded=false;
- const drag=Math.exp(-1.15*dt);locomotionVelocity.x*=drag;locomotionVelocity.z*=drag;
- if(Math.abs(locomotionVelocity.x)+Math.abs(locomotionVelocity.z)<.015){locomotionVelocity.x=0;locomotionVelocity.z=0;}
- if(xrRig.position.x<-29||xrRig.position.x>29)locomotionVelocity.x*=-.25;if(xrRig.position.z<-29||xrRig.position.z>29)locomotionVelocity.z*=-.25;xrRig.position.x=THREE.MathUtils.clamp(xrRig.position.x,-29,29);xrRig.position.z=THREE.MathUtils.clamp(xrRig.position.z,-29,29);player.position.copy(xrRig.position);player.position.y=0;player.rotation.y=yaw;if(netReady&&performance.now()-lastNetSend>90){lastNetSend=performance.now();netSend({type:'move',x:xrRig.position.x,y:xrRig.position.y,z:xrRig.position.z,yaw});}}
+ const nextRigPosition=xrRig.position.clone().addScaledVector(locomotionVelocity,dt);
+ // Keep the player above the island floor.
+ if(nextRigPosition.y<0){nextRigPosition.y=0;if(locomotionVelocity.y<0)locomotionVelocity.y=0;grounded=true}else grounded=false;
+ xrRig.position.copy(nextRigPosition);
+ const drag=Math.exp(-.72*dt);locomotionVelocity.x*=drag;locomotionVelocity.z*=drag;
+ if(Math.abs(locomotionVelocity.x)+Math.abs(locomotionVelocity.z)<.01){locomotionVelocity.x=0;locomotionVelocity.z=0;}
+ if(xrRig.position.x<-29||xrRig.position.x>29)locomotionVelocity.x*=-.25;
+ if(xrRig.position.z<-29||xrRig.position.z>29)locomotionVelocity.z*=-.25;
+ xrRig.position.x=THREE.MathUtils.clamp(xrRig.position.x,-29,29);
+ xrRig.position.z=THREE.MathUtils.clamp(xrRig.position.z,-29,29);
+ player.position.copy(xrRig.position);player.position.y=0;player.rotation.y=yaw;
+ if(netReady&&performance.now()-lastNetSend>90){lastNetSend=performance.now();netSend({type:'move',x:xrRig.position.x,y:xrRig.position.y,z:xrRig.position.z,yaw});}
  player.position.x=THREE.MathUtils.clamp(player.position.x,-29,29);player.position.z=THREE.MathUtils.clamp(player.position.z,-29,29);
  for(const b of bots){b.phase+=dt*b.speed;if(round?.active&&['tag','hide','infection'].includes(mode)&&b.role==='seeker'&&distance(b.mesh,player)<13){const d=player.position.clone().sub(b.mesh.position);d.y=0;if(d.lengthSq()>.01){d.normalize();b.mesh.position.addScaledVector(d,dt*(mode==='infection'?2.5:2.1));b.mesh.rotation.y=Math.atan2(-d.x,-d.z)}}else if(round?.active&&mode==='tag'&&b.role==='wander'){b.mesh.position.x+=Math.sin(b.phase)*dt*.3;b.mesh.position.z+=Math.cos(b.phase*.7)*dt*.25}else{b.mesh.position.x+=Math.sin(b.phase)*dt*.35;b.mesh.position.z+=Math.cos(b.phase*.7)*dt*.3}b.mesh.position.x=THREE.MathUtils.clamp(b.mesh.position.x,-30,30);b.mesh.position.z=THREE.MathUtils.clamp(b.mesh.position.z,-30,30);b.mesh.rotation.y+=dt*.1;}
  for(let i=snowballs.length-1;i>=0;i--){const s=snowballs[i];s.life-=dt;s.vel.y-=9.8*dt;s.mesh.position.addScaledVector(s.vel,dt);let hit=false;for(const b of bots)if(s.mesh.position.distanceTo(b.mesh.position.clone().add(new THREE.Vector3(0,1,0)))<.75){hit=true;paintHits++;gameScore++;$('#gameScore').textContent=gameScore;notify('Snowball hit! +1');break}if(s.life<=0||hit){scene.remove(s.mesh);snowballs.splice(i,1)}}
