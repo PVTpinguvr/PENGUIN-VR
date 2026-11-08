@@ -1,6 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 
 const PORT=Number(process.env.PORT||8080);
@@ -22,7 +23,7 @@ function enter(ws,msg){
  let room=rooms.get(key);if(!room){room={key,map,mode,players:new Map()};rooms.set(key,room)}
  const player={id,name,map,mode,cosmetic:clean(msg.cosmetic,24),x:0,y:0,z:0,yaw:0,ws,room};
  room.players.set(id,player);clients.set(ws,player);
- send(ws,{type:'welcome',id,ownerId:state.ownerId,isOwner:id===state.ownerId,room:key,players:publicPlayers(room),leaderboard:(state.leaderboards[map]||[]).slice(0,10)});
+ send(ws,{type:'welcome',id,isOwner,ownerToken,room:key,players:publicPlayers(room),leaderboard:(state.leaderboards[map]||[]).slice(0,10)});
  broadcast(room,{type:'player-joined',player:{id,name,x:0,y:0,z:0,yaw:0,cosmetic:player.cosmetic}},ws);
 }
 const server=http.createServer((req,res)=>{if(req.url==='/health'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,rooms:rooms.size,players:clients.size}));return}res.writeHead(200,{'content-type':'text/plain'});res.end('PENGUIN VR realtime server')});
