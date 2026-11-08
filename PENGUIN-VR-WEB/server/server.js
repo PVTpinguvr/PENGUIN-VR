@@ -8,7 +8,7 @@ const PORT=Number(process.env.PORT||8080);
 const DATA_DIR=process.env.DATA_DIR||'./data';
 fs.mkdirSync(DATA_DIR,{recursive:true});
 const STORE=path.join(DATA_DIR,'penguin-vr-state.json');
-const load=()=>{try{return JSON.parse(fs.readFileSync(STORE,'utf8'))}catch{return {ownerId:null,leaderboards:{}}}};
+const load=()=>{try{return JSON.parse(fs.readFileSync(STORE,'utf8'))}catch{return {ownerId:null,ownerTokenHash:null,leaderboards:{}}}};
 const state=load();
 const save=()=>fs.writeFileSync(STORE,JSON.stringify(state,null,2));
 const rooms=new Map(),clients=new Map();
@@ -18,8 +18,16 @@ const roomKey=(map,mode)=>map+':'+mode;
 function broadcast(room,data,except=null){for(const ws of room?.players.values()||[])if(ws!==except)send(ws,data)}
 function publicPlayers(room){return [...room.players.values()].map(p=>({id:p.id,name:p.name,x:p.x,y:p.y,z:p.z,yaw:p.yaw,cosmetic:p.cosmetic}))}
 function enter(ws,msg){
- const id=crypto.randomUUID(),name=clean(msg.name),map=clean(msg.map,24),mode=clean(msg.mode,24),key=roomKey(map,mode);
- if(!state.ownerId){state.ownerId=id;save()}
+ let id=randomUUID(),ownerToken=null,isOwner=false;
+ const supplied=typeof msg.ownerToken==='string'?createHash('sha256').update(msg.ownerToken).digest('hex'):'';
+ if(!state.ownerId){
+  id=String(msg.playerId||randomUUID()).slice(0,64);
+  ownerToken=randomBytes(32).toString('hex');
+  state.ownerId=id;
+  state.ownerTokenHash=createHash('sha256').update(ownerToken).digest('hex');
+  isOwner=true;save();
+ }else if(supplied&&supplied===state.ownerTokenHash){id=state.ownerId;isOwner=true}
+ const name=clean(msg.name),map=clean(msg.map,24),mode=clean(msg.mode,24),key=roomKey(map,mode);
  let room=rooms.get(key);if(!room){room={key,map,mode,players:new Map()};rooms.set(key,room)}
  const player={id,name,map,mode,cosmetic:clean(msg.cosmetic,24),x:0,y:0,z:0,yaw:0,ws,room};
  room.players.set(id,player);clients.set(ws,player);
@@ -42,8 +50,7 @@ wss.on('connection',ws=>{
    broadcast(p.room,{type:'player-moved',player:{id:p.id,name:p.name,x:p.x,y:p.y,z:p.z,yaw:p.yaw,cosmetic:p.cosmetic}},ws);
   }else if(msg.type==='score'){
    const score=Math.max(0,Math.min(1000000,Math.floor(Number(msg.score)||0)));
-   const list=state.leaderboards[p.map]||[];
-   const old=list.find(x=>x.id===p.id);
+   const list=state.leaderboards[p.map]||[];const old=list.find(x=>x.id===p.id);
    if(old)old.score=Math.max(old.score,score);else list.push({id:p.id,name:p.name,score});
    list.sort((a,b)=>b.score-a.score);state.leaderboards[p.map]=list.slice(0,100);save();
    send(ws,{type:'leaderboard',entries:list.slice(0,10)});
