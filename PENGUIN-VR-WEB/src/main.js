@@ -177,7 +177,7 @@ function updateWorldLobby(dt,xr){
 
 /* Optional live public-room connection. Configure PENGUIN_SERVER_URL to enable it. */
 const playerId=localStorage.getItem('penguinVRPlayerId')||crypto.randomUUID();
-localStorage.setItem('penguinVRPlayerId',playerId);
+localStorage.setItem('penguinVRPlayerId',playerId);let networkPlayerId=playerId;const ownerToken=localStorage.getItem('penguinVROwnerToken')||'';
 let netSocket=null,netReady=false,lastNetSend=0,networkRoom='',isVerifiedOwner=false;
 const remotePlayers=new Map();
 function netSend(data){if(netSocket&&netSocket.readyState===WebSocket.OPEN)netSocket.send(JSON.stringify(data))}
@@ -189,17 +189,17 @@ function connectPublicRoom(){
  try{
   netSocket=new WebSocket(window.PENGUIN_SERVER_URL);
   netSocket.addEventListener('open',()=>{
-   netSend({type:'join',playerId,name:save.name,map:$('#map').value,mode:mode==='lobby'?'social':mode,cosmetic:save.equipped});
+   netSend({type:'join',playerId,ownerToken,name:save.name,map:$('#map').value,mode:mode==='lobby'?'social':mode,cosmetic:save.equipped});
   });
   netSocket.addEventListener('message',ev=>{
    let m;try{m=JSON.parse(ev.data)}catch{return}
    if(m.type==='welcome'){
-    netReady=true;networkRoom=m.room;isVerifiedOwner=!!m.isOwner;
+    netReady=true;networkPlayerId=m.id;if(m.ownerToken)localStorage.setItem('penguinVROwnerToken',m.ownerToken);networkRoom=m.room;isVerifiedOwner=!!m.isOwner;
     const status=m.isOwner?'OWNER · ONLINE':'PUBLIC ROOM · ONLINE';
     computerScreen.material=worldText('CONNECTED','ROOM '+m.room+' · '+status);computerScreen.material.needsUpdate=true;
-    for(const p of m.players||[])if(p.id!==playerId){upsertRemote(p);if(playerId<p.id)callPeer(p.id,true);else callPeer(p.id,false);}
+    for(const p of m.players||[])if(p.id!==networkPlayerId){upsertRemote(p);if(networkPlayerId<p.id)callPeer(p.id,true);else callPeer(p.id,false);}
     if(m.leaderboard)updateLeaderboard(m.leaderboard);
-   }else if(m.type==='player-joined'){upsertRemote(m.player);if(playerId<m.player.id)callPeer(m.player.id,true);else callPeer(m.player.id,false);}else if(m.type==='player-moved')upsertRemote(m.player);
+   }else if(m.type==='player-joined'){upsertRemote(m.player);if(networkPlayerId<m.player.id)callPeer(m.player.id,true);else callPeer(m.player.id,false);}else if(m.type==='player-moved')upsertRemote(m.player);
    else if(m.type==='player-left'){const v=remotePlayers.get(m.id);if(v)scene.remove(v.mesh);remotePlayers.delete(m.id)}
    else if(m.type==='leaderboard')updateLeaderboard(m.entries||[]);else if(m.type==='signal')receiveSignal(m.from,m.signal);
    else if(m.type==='announcement'){computerScreen.material=worldText('ANNOUNCEMENT',m.message||'');computerScreen.material.needsUpdate=true}
@@ -211,7 +211,7 @@ function connectPublicRoom(){
  }catch(e){console.warn('PENGUIN VR connection failed',e)}
 }
 function upsertRemote(p){
- if(!p||p.id===playerId)return;
+ if(!p||p.id===networkPlayerId)return;
  let v=remotePlayers.get(p.id);
  if(!v){const mesh=makePenguin(catalog.find(c=>c.id===p.cosmetic)?.color||0x202a42);scene.add(mesh);v={mesh,target:new THREE.Vector3()};remotePlayers.set(p.id,v)}
  v.target.set(Number(p.x)||0,0,Number(p.z)||0);v.mesh.rotation.y=Number(p.yaw)||0;
