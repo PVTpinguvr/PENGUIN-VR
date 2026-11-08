@@ -132,6 +132,10 @@ kioskItems.forEach((id,i)=>{const item=catalog.find(v=>v.id===id),x=-1.55+(i%2)*
  const b=new THREE.Mesh(new THREE.BoxGeometry(1.25,.2,.72),new THREE.MeshStandardMaterial({color:item.color,emissive:item.color,emissiveIntensity:.18}));b.position.set(x,.22,z);b.userData.shop=id;scene.add(b);worldKioskButtons.push(b);
  const label=signBoard(item.name,'FISH '+item.cost,new THREE.Vector3(x,.9,z),1.8,.62);label.rotation.x=-.25;
 });
+const ownerButtons=[];
+const ownerFrame=new THREE.Mesh(new THREE.BoxGeometry(4.6,2.5,.22),mat(0x302a4f));ownerFrame.position.set(-9,2,5);scene.add(ownerFrame);
+const ownerScreen=signBoard('STAFF CONSOLE','FIRST PLAYER OWNER ONLY',new THREE.Vector3(-9,2,4.84),4.35,2.25);
+[['ANNOUNCE','announce'],['MUTE NEAREST','mute'],['KICK NEAREST','kick']].forEach((v,i)=>{const b=new THREE.Mesh(new THREE.BoxGeometry(1.25,.2,.72),new THREE.MeshStandardMaterial({color:0x8056a8,emissive:0x32194e}));b.position.set(-10.4+i*1.4,.22,5.8);b.userData.ownerAction=v[1];scene.add(b);ownerButtons.push(b);const t=signBoard(v[0],'STAFF',new THREE.Vector3(-10.4+i*1.4,.9,5.8),1.6,.55);t.rotation.x=-.2});
 const questBoard=signBoard('DAILY QUEST','VISIT 2 MAP GATES · EARN 75 FISH',new THREE.Vector3(9,2,4),3.8,1.5);
 const ownerBoard=signBoard('PENGUIN STAFF','OWNER POWERS REQUIRE VERIFIED FIRST JOIN',new THREE.Vector3(-9,2,4),4.2,1.5);
 const boardEntries=['1  ICEKING     2450','2  PINGU       1980','3  SNOWFLAKE   1760','4  FROSTY      1520','5  WADDLES     1200'];
@@ -152,9 +156,9 @@ controllers.forEach((controller,i)=>{
   const origin=new THREE.Vector3(),direction=new THREE.Vector3(0,0,-1);
   controller.getWorldPosition(origin);direction.applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion()));
   raycaster.set(origin,direction);
-  const interactables=[...computerButtons,...worldKioskButtons];
+  const interactables=[...computerButtons,...worldKioskButtons,...ownerButtons];
   const hit=raycaster.intersectObjects(interactables,false)[0];
-  if(hit){if(hit.object.userData.mode){selectedWorldMode=hit.object.userData.mode;inWorldMode=selectedWorldMode;computerScreen.material=worldText('MODE: '+selectedWorldMode.toUpperCase(),'SELECTED · WALK THROUGH A MAP GATE');computerScreen.material.needsUpdate=true;}else if(hit.object.userData.shop){const item=catalog.find(v=>v.id===hit.object.userData.shop);if(item){if(save.owned.includes(item.id)){save.equipped=item.id;applyPenguinColor();persist();shopScreen.material=worldText('EQUIPPED: '+item.name,'YOUR PENGUIN STYLE IS UPDATED');}else if(save.coins>=item.cost){save.coins-=item.cost;save.owned.push(item.id);save.equipped=item.id;applyPenguinColor();persist();shopScreen.material=worldText('PURCHASED: '+item.name,'LOOKING FRESH!');}else shopScreen.material=worldText('NOT ENOUGH FISH','EARN COINS BY PLAYING');shopScreen.material.needsUpdate=true;}}}
+  if(hit){if(hit.object.userData.mode){selectedWorldMode=hit.object.userData.mode;inWorldMode=selectedWorldMode;computerScreen.material=worldText('MODE: '+selectedWorldMode.toUpperCase(),'SELECTED · WALK THROUGH A MAP GATE');computerScreen.material.needsUpdate=true;}else if(hit.object.userData.ownerAction){if(!isVerifiedOwner){ownerScreen.material=worldText('OWNER ONLY','THIS ACCOUNT IS NOT THE VERIFIED OWNER');ownerScreen.material.needsUpdate=true;}else{const action=hit.object.userData.ownerAction;const nearest=[...remotePlayers.entries()].sort((a,b)=>a[1].mesh.position.distanceTo(xrRig.position)-b[1].mesh.position.distanceTo(xrRig.position))[0];netSend({type:'owner-action',action,target:nearest?.[0],message:'Welcome to PENGUIN VR!'});ownerScreen.material=worldText('STAFF ACTION SENT',action.toUpperCase());ownerScreen.material.needsUpdate=true;}}else if(hit.object.userData.shop){const item=catalog.find(v=>v.id===hit.object.userData.shop);if(item){if(save.owned.includes(item.id)){save.equipped=item.id;applyPenguinColor();persist();shopScreen.material=worldText('EQUIPPED: '+item.name,'YOUR PENGUIN STYLE IS UPDATED');}else if(save.coins>=item.cost){save.coins-=item.cost;save.owned.push(item.id);save.equipped=item.id;applyPenguinColor();persist();shopScreen.material=worldText('PURCHASED: '+item.name,'LOOKING FRESH!');}else shopScreen.material=worldText('NOT ENOUGH FISH','EARN COINS BY PLAYING');shopScreen.material.needsUpdate=true;}}}
  });
 });
 let inWorldMode='lobby',selectedWorldMode='tag',lastPortalJoin=0;
