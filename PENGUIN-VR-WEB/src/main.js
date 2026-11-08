@@ -142,10 +142,10 @@ controllers.forEach((controller,i)=>{
   controller.getWorldPosition(origin);direction.applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion()));
   raycaster.set(origin,direction);
   const hit=raycaster.intersectObjects(computerButtons,false)[0];
-  if(hit){const m=hit.object.userData.mode;startMode(m);inWorldMode=m;computerScreen.material=worldText('MODE: '+m.toUpperCase(),'WALK THROUGH A MAP GATE TO ENTER');}
+  if(hit){selectedWorldMode=hit.object.userData.mode;inWorldMode=selectedWorldMode;computerScreen.material=worldText('MODE: '+selectedWorldMode.toUpperCase(),'SELECTED · WALK THROUGH A MAP GATE');computerScreen.material.needsUpdate=true;}
  });
 });
-let inWorldMode='lobby',lastPortalJoin=0;
+let inWorldMode='lobby',selectedWorldMode='tag',lastPortalJoin=0;
 function updateWorldLobby(dt,xr){
  if(!xr)return;
  const p=xrRig.position;
@@ -154,8 +154,8 @@ function updateWorldLobby(dt,xr){
   gate.ring.material.emissiveIntensity=near?2.4:1.1;
   if(near&&!gate.inside&&performance.now()-lastPortalJoin>1800){
    gate.inside=true;lastPortalJoin=performance.now();
-   setMap(gate.map);startMode('lobby');inWorldMode='lobby';
-   computerScreen.material=worldText(gate.name,'PUBLIC MATCHMAKING PLACEHOLDER · SERVER NOT LIVE');
+   setMap(gate.map);startMode(selectedWorldMode);inWorldMode=selectedWorldMode;
+   computerScreen.material=worldText(gate.name+' · '+selectedWorldMode.toUpperCase(),'PUBLIC MATCHMAKING PLACEHOLDER · SERVER NOT LIVE');
    computerScreen.material.needsUpdate=true;
   }
   if(!near)gate.inside=false;
