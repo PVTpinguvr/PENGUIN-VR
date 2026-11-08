@@ -63,7 +63,7 @@ const checkpoints=[];for(let i=0;i<5;i++){const a=i/5*Math.PI*2;const ring=new T
 const crown=addMesh(new THREE.TorusGeometry(2.8,.14,8,32),mat(0xffd34d),0,.15,-8);crown.rotation.x=Math.PI/2;crown.visible=false;
 // Desktop / mobile / XR controls
 const keys={};let yaw=0,pitch=0,locked=false,hop=0,mode='lobby',round=null,gameScore=0,gameTime=0,checkpoint=0,paintHits=0;addEventListener('keydown',e=>{keys[e.code]=true;if(['Space','ArrowUp','ArrowDown'].includes(e.code))e.preventDefault()});addEventListener('keyup',e=>keys[e.code]=false);renderer.domElement.addEventListener('click',()=>{if(!renderer.xr.isPresenting&&mode==='paint')throwSnowball();else if(!renderer.xr.isPresenting)renderer.domElement.requestPointerLock?.()});document.addEventListener('pointerlockchange',()=>locked=document.pointerLockElement===renderer.domElement);document.addEventListener('mousemove',e=>{if(locked){yaw-=e.movementX*.002*save.sensitivity;pitch=Math.max(-.8,Math.min(.8,pitch-e.movementY*.002*save.sensitivity))}});
-const controllers=[renderer.xr.getController(0),renderer.xr.getController(1)];controllers.forEach(c=>xrRig.add(c));const grips=[renderer.xr.getControllerGrip(0),renderer.xr.getControllerGrip(1)];grips.forEach(g=>xrRig.add(g));const previousHands=[new THREE.Vector3(),new THREE.Vector3()];let handsReady=false;const locomotionVelocity=new THREE.Vector3();let grounded=false;const handContact=[false,false];renderer.xr.addEventListener('sessionstart',()=>{document.body.classList.add('vr-active');xrRig.position.copy(player.position);camera.position.set(0,0,0);handsReady=false;locomotionVelocity.set(0,0,0);notify('VR ready — push off the ice with your flippers to move!')});renderer.xr.addEventListener('sessionend',()=>{document.body.classList.remove('vr-active');xrRig.position.set(0,0,0);camera.position.set(0,2.2,7);handsReady=false;locomotionVelocity.set(0,0,0)});controllers.forEach(c=>c.addEventListener('select',()=>{if(mode==='paint')throwSnowball()}));
+const controllers=[renderer.xr.getController(0),renderer.xr.getController(1)];controllers.forEach(c=>xrRig.add(c));const grips=[renderer.xr.getControllerGrip(0),renderer.xr.getControllerGrip(1)];grips.forEach(g=>xrRig.add(g));const previousHands=[new THREE.Vector3(),new THREE.Vector3()];let handsReady=false;const locomotionVelocity=new THREE.Vector3();let grounded=false;const handContact=[false,false];renderer.xr.addEventListener('sessionstart',()=>{document.body.classList.add('vr-active');xrRig.position.copy(player.position);camera.position.set(0,0,0);handsReady=false;locomotionVelocity.set(0,0,0);connectPublicRoom();notify('VR ready — push off the ice with your flippers to move!')});renderer.xr.addEventListener('sessionend',()=>{document.body.classList.remove('vr-active');if(netSocket){netSocket.close();netSocket=null}netReady=false;clearRemotePlayers();xrRig.position.set(0,0,0);camera.position.set(0,2.2,7);handsReady=false;locomotionVelocity.set(0,0,0)});controllers.forEach(c=>c.addEventListener('select',()=>{if(mode==='paint')throwSnowball()}));
 $('#jumpBtn').onclick=()=>hop=4.2;$('#throwBtn').onclick=throwSnowball;
 function setMap(m){scene.background=new THREE.Color(m==='night'?0x111a45:m==='cove'?0x83cbe6:m==='summit'?0xc6dced:0x9cc9e8);scene.fog.color.copy(scene.background);notify('Map changed: '+$('#map').selectedOptions[0].text)}
 $('#map').onchange=e=>setMap(e.target.value);
@@ -166,13 +166,62 @@ function updateWorldLobby(dt,xr){
   gate.ring.material.emissiveIntensity=near?2.4:1.1;
   if(near&&!gate.inside&&performance.now()-lastPortalJoin>1800){
    gate.inside=true;lastPortalJoin=performance.now();
-   setMap(gate.map);startMode(selectedWorldMode);inWorldMode=selectedWorldMode;
+   setMap(gate.map);startMode(selectedWorldMode);inWorldMode=selectedWorldMode;if(netSocket)connectPublicRoom();
    computerScreen.material=worldText(gate.name+' · '+selectedWorldMode.toUpperCase(),'PUBLIC MATCHMAKING PLACEHOLDER · SERVER NOT LIVE');
    computerScreen.material.needsUpdate=true;
   }
   if(!near)gate.inside=false;
  }
 }
+
+
+/* Optional live public-room connection. Configure PENGUIN_SERVER_URL to enable it. */
+const playerId=localStorage.getItem('penguinVRPlayerId')||crypto.randomUUID();
+localStorage.setItem('penguinVRPlayerId',playerId);
+let netSocket=null,netReady=false,lastNetSend=0,networkRoom='',isVerifiedOwner=false;
+const remotePlayers=new Map();
+function netSend(data){if(netSocket&&netSocket.readyState===WebSocket.OPEN)netSocket.send(JSON.stringify(data))}
+function clearRemotePlayers(){for(const v of remotePlayers.values())scene.remove(v.mesh);remotePlayers.clear()}
+function connectPublicRoom(){
+ if(!window.PENGUIN_SERVER_URL||!renderer.xr.isPresenting)return;
+ if(netSocket){netSocket.onclose=null;netSocket.close();netSocket=null}
+ netReady=false;clearRemotePlayers();
+ try{
+  netSocket=new WebSocket(window.PENGUIN_SERVER_URL);
+  netSocket.addEventListener('open',()=>{
+   netSend({type:'join',playerId,name:save.name,map:$('#map').value,mode:mode==='lobby'?'social':mode,cosmetic:save.equipped});
+  });
+  netSocket.addEventListener('message',ev=>{
+   let m;try{m=JSON.parse(ev.data)}catch{return}
+   if(m.type==='welcome'){
+    netReady=true;networkRoom=m.room;isVerifiedOwner=!!m.isOwner;
+    const status=m.isOwner?'OWNER · ONLINE':'PUBLIC ROOM · ONLINE';
+    computerScreen.material=worldText('CONNECTED','ROOM '+m.room+' · '+status);computerScreen.material.needsUpdate=true;
+    for(const p of m.players||[])if(p.id!==playerId)upsertRemote(p);
+    if(m.leaderboard)updateLeaderboard(m.leaderboard);
+   }else if(m.type==='player-joined'||m.type==='player-moved')upsertRemote(m.player);
+   else if(m.type==='player-left'){const v=remotePlayers.get(m.id);if(v)scene.remove(v.mesh);remotePlayers.delete(m.id)}
+   else if(m.type==='leaderboard')updateLeaderboard(m.entries||[]);
+   else if(m.type==='announcement'){computerScreen.material=worldText('ANNOUNCEMENT',m.message||'');computerScreen.material.needsUpdate=true}
+   else if(m.type==='moderation'){if(m.action==='kick'){netSocket.close();computerScreen.material=worldText('REMOVED FROM ROOM','THE OWNER REMOVED YOU')}else if(m.action==='mute')voiceMuted=true}
+   else if(m.type==='chat')console.info('[PENGUIN CHAT]',m.name+': '+m.text);
+  });
+  netSocket.addEventListener('close',()=>{netReady=false;isVerifiedOwner=false;clearRemotePlayers()});
+  netSocket.addEventListener('error',()=>{netReady=false});
+ }catch(e){console.warn('PENGUIN VR connection failed',e)}
+}
+function upsertRemote(p){
+ if(!p||p.id===playerId)return;
+ let v=remotePlayers.get(p.id);
+ if(!v){const mesh=makePenguin(catalog.find(c=>c.id===p.cosmetic)?.color||0x202a42);scene.add(mesh);v={mesh,target:new THREE.Vector3()};remotePlayers.set(p.id,v)}
+ v.target.set(Number(p.x)||0,0,Number(p.z)||0);v.mesh.rotation.y=Number(p.yaw)||0;
+}
+function updateLeaderboard(entries){
+ const c=boardCanvas.getContext('2d');c.fillStyle='#101a35';c.fillRect(0,0,768,512);c.fillStyle='#fff';c.font='bold 48px system-ui';c.fillText('MAP LEADERBOARD',40,68);c.font='30px system-ui';c.fillStyle='#c7e9ff';
+ (entries||[]).slice(0,10).forEach((e,i)=>c.fillText((i+1)+'. '+String(e.name||'Pingu').slice(0,18)+'  '+(e.score||0),45,130+i*36));
+ c.font='20px system-ui';c.fillStyle='#8fb4d9';c.fillText('SERVER SAVED SCORES',40,490);const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;leaderboard.material.map=tex;leaderboard.material.needsUpdate=true;
+}
+let voiceMuted=false;
 
 const clock=new THREE.Clock();function animate(){const dt=Math.min(clock.getDelta(),.04),t=clock.elapsedTime,xr=renderer.xr.isPresenting;
  if(!xr){player.visible=false;$('#status').textContent='VR REQUIRED · ENTER IMMERSIVE MODE';}else{player.visible=true;const head=renderer.xr.getCamera(camera),dir=new THREE.Vector3();head.getWorldDirection(dir);yaw=Math.atan2(-dir.x,-dir.z);const handNow=grips.map(g=>{const p=new THREE.Vector3();g.getWorldPosition(p);return p});if(!handsReady){handNow.forEach((p,i)=>previousHands[i].copy(p));handsReady=true}
@@ -196,12 +245,12 @@ const clock=new THREE.Clock();function animate(){const dt=Math.min(clock.getDelt
  if(xrRig.position.y<0){xrRig.position.y=0;if(locomotionVelocity.y<0)locomotionVelocity.y=0;grounded=true}else grounded=false;
  const drag=Math.exp(-1.15*dt);locomotionVelocity.x*=drag;locomotionVelocity.z*=drag;
  if(Math.abs(locomotionVelocity.x)+Math.abs(locomotionVelocity.z)<.015){locomotionVelocity.x=0;locomotionVelocity.z=0;}
- if(xrRig.position.x<-29||xrRig.position.x>29)locomotionVelocity.x*=-.25;if(xrRig.position.z<-29||xrRig.position.z>29)locomotionVelocity.z*=-.25;xrRig.position.x=THREE.MathUtils.clamp(xrRig.position.x,-29,29);xrRig.position.z=THREE.MathUtils.clamp(xrRig.position.z,-29,29);player.position.copy(xrRig.position);player.position.y=0;player.rotation.y=yaw;}
+ if(xrRig.position.x<-29||xrRig.position.x>29)locomotionVelocity.x*=-.25;if(xrRig.position.z<-29||xrRig.position.z>29)locomotionVelocity.z*=-.25;xrRig.position.x=THREE.MathUtils.clamp(xrRig.position.x,-29,29);xrRig.position.z=THREE.MathUtils.clamp(xrRig.position.z,-29,29);player.position.copy(xrRig.position);player.position.y=0;player.rotation.y=yaw;if(netReady&&performance.now()-lastNetSend>90){lastNetSend=performance.now();netSend({type:'move',x:xrRig.position.x,y:xrRig.position.y,z:xrRig.position.z,yaw});}}
  player.position.x=THREE.MathUtils.clamp(player.position.x,-29,29);player.position.z=THREE.MathUtils.clamp(player.position.z,-29,29);
  for(const b of bots){b.phase+=dt*b.speed;if(round?.active&&['tag','hide','infection'].includes(mode)&&b.role==='seeker'&&distance(b.mesh,player)<13){const d=player.position.clone().sub(b.mesh.position);d.y=0;if(d.lengthSq()>.01){d.normalize();b.mesh.position.addScaledVector(d,dt*(mode==='infection'?2.5:2.1));b.mesh.rotation.y=Math.atan2(-d.x,-d.z)}}else if(round?.active&&mode==='tag'&&b.role==='wander'){b.mesh.position.x+=Math.sin(b.phase)*dt*.3;b.mesh.position.z+=Math.cos(b.phase*.7)*dt*.25}else{b.mesh.position.x+=Math.sin(b.phase)*dt*.35;b.mesh.position.z+=Math.cos(b.phase*.7)*dt*.3}b.mesh.position.x=THREE.MathUtils.clamp(b.mesh.position.x,-30,30);b.mesh.position.z=THREE.MathUtils.clamp(b.mesh.position.z,-30,30);b.mesh.rotation.y+=dt*.1;}
  for(let i=snowballs.length-1;i>=0;i--){const s=snowballs[i];s.life-=dt;s.vel.y-=9.8*dt;s.mesh.position.addScaledVector(s.vel,dt);let hit=false;for(const b of bots)if(s.mesh.position.distanceTo(b.mesh.position.clone().add(new THREE.Vector3(0,1,0)))<.75){hit=true;paintHits++;gameScore++;$('#gameScore').textContent=gameScore;notify('Snowball hit! +1');break}if(s.life<=0||hit){scene.remove(s.mesh);snowballs.splice(i,1)}}
  if(round?.active&&!round.ended){round.elapsed+=dt;gameTime=Math.max(0,90-round.elapsed);$('#gameTimer').textContent=Math.ceil(gameTime)+' seconds left';if(mode==='king'&&Math.hypot(player.position.x,player.position.z+8)<3.2){round.king+=dt;gameScore=Math.floor(round.king*2);$('#gameScore').textContent=gameScore}if(mode==='race'&&player.position.distanceTo(checkpoints[checkpoint].position)<1.6){checkpoints[checkpoint].visible=false;checkpoint++;gameScore=checkpoint;$('#gameScore').textContent=gameScore;if(checkpoint<checkpoints.length)checkpoints[checkpoint].visible=true;else finishRound('You completed the iceberg race!')}if(['tag','hide','infection'].includes(mode)){const seeker=bots.find(b=>b.role==='seeker'||b.role==='infected');if(seeker&&distance(seeker.mesh,player)<.85){if(mode==='tag')finishRound('You were tagged! Try again and avoid the seeker.');else if(mode==='hide')finishRound('The seekers found you! Try hiding for longer.');else finishRound('You were infected! The colony got you.')}}if(gameTime<=0&&!round.ended)finishRound(mode==='king'?'Time up! Your ring score: '+gameScore:'You survived the round! Great job.')}
- updateWorldLobby(dt,xr);player.userData.wings.forEach((w,i)=>{w.rotation.z=(i===0?-.28:.28)+Math.sin(t*7+(i* Math.PI))*0.12});if(!xr)$('#status').textContent='VR REQUIRED';else $('#status').textContent='QUEST VR · IMMERSIVE';renderer.render(scene,camera)}renderer.setAnimationLoop(animate);
+ for(const v of remotePlayers.values())v.mesh.position.lerp(v.target,Math.min(1,dt*12));updateWorldLobby(dt,xr);player.userData.wings.forEach((w,i)=>{w.rotation.z=(i===0?-.28:.28)+Math.sin(t*7+(i* Math.PI))*0.12});if(!xr)$('#status').textContent='VR REQUIRED';else $('#status').textContent='QUEST VR · IMMERSIVE';renderer.render(scene,camera)}renderer.setAnimationLoop(animate);
 const vr=VRButton.createButton(renderer);vr.id='vrButton';vr.textContent='ENTER QUEST VR';document.body.appendChild(vr);
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
 if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
