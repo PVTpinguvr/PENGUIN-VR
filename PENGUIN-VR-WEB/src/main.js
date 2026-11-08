@@ -177,7 +177,7 @@ function updateWorldLobby(dt,xr){
 
 /* Optional live public-room connection. Configure PENGUIN_SERVER_URL to enable it. */
 const playerId=localStorage.getItem('penguinVRPlayerId')||crypto.randomUUID();
-localStorage.setItem('penguinVRPlayerId',playerId);let networkPlayerId=playerId;const ownerToken=localStorage.getItem('penguinVROwnerToken')||'';
+localStorage.setItem('penguinVRPlayerId',playerId);let networkPlayerId=playerId,ownerToken=localStorage.getItem('penguinVROwnerToken')||'';
 let netSocket=null,netReady=false,lastNetSend=0,networkRoom='',isVerifiedOwner=false;
 const remotePlayers=new Map();
 function netSend(data){if(netSocket&&netSocket.readyState===WebSocket.OPEN)netSocket.send(JSON.stringify(data))}
@@ -194,7 +194,7 @@ function connectPublicRoom(){
   netSocket.addEventListener('message',ev=>{
    let m;try{m=JSON.parse(ev.data)}catch{return}
    if(m.type==='welcome'){
-    netReady=true;networkPlayerId=m.id;if(m.ownerToken)localStorage.setItem('penguinVROwnerToken',m.ownerToken);networkRoom=m.room;isVerifiedOwner=!!m.isOwner;
+    netReady=true;networkPlayerId=m.id;if(m.ownerToken){ownerToken=m.ownerToken;localStorage.setItem('penguinVROwnerToken',m.ownerToken)}networkRoom=m.room;isVerifiedOwner=!!m.isOwner;
     const status=m.isOwner?'OWNER · ONLINE':'PUBLIC ROOM · ONLINE';
     computerScreen.material=worldText('CONNECTED','ROOM '+m.room+' · '+status);computerScreen.material.needsUpdate=true;
     for(const p of m.players||[])if(p.id!==networkPlayerId){upsertRemote(p);if(networkPlayerId<p.id)callPeer(p.id,true);else callPeer(p.id,false);}
