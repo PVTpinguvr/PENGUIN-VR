@@ -63,7 +63,7 @@ const checkpoints=[];for(let i=0;i<5;i++){const a=i/5*Math.PI*2;const ring=new T
 const crown=addMesh(new THREE.TorusGeometry(2.8,.14,8,32),mat(0xffd34d),0,.15,-8);crown.rotation.x=Math.PI/2;crown.visible=false;
 // Desktop / mobile / XR controls
 const keys={};let yaw=0,pitch=0,locked=false,hop=0,mode='lobby',round=null,gameScore=0,gameTime=0,checkpoint=0,paintHits=0;addEventListener('keydown',e=>{keys[e.code]=true;if(['Space','ArrowUp','ArrowDown'].includes(e.code))e.preventDefault()});addEventListener('keyup',e=>keys[e.code]=false);renderer.domElement.addEventListener('click',()=>{if(!renderer.xr.isPresenting&&mode==='paint')throwSnowball();else if(!renderer.xr.isPresenting)renderer.domElement.requestPointerLock?.()});document.addEventListener('pointerlockchange',()=>locked=document.pointerLockElement===renderer.domElement);document.addEventListener('mousemove',e=>{if(locked){yaw-=e.movementX*.002*save.sensitivity;pitch=Math.max(-.8,Math.min(.8,pitch-e.movementY*.002*save.sensitivity))}});
-const controllers=[renderer.xr.getController(0),renderer.xr.getController(1)];controllers.forEach(c=>xrRig.add(c));const grips=[renderer.xr.getControllerGrip(0),renderer.xr.getControllerGrip(1)];grips.forEach(g=>xrRig.add(g));const previousHands=[new THREE.Vector3(),new THREE.Vector3()];let handsReady=false;renderer.xr.addEventListener('sessionstart',()=>{document.body.classList.add('vr-active');xrRig.position.copy(player.position);camera.position.set(0,0,0);handsReady=false;notify('VR ready — push off the ice with your flippers to move!')});renderer.xr.addEventListener('sessionend',()=>{document.body.classList.remove('vr-active');xrRig.position.set(0,0,0);camera.position.set(0,2.2,7);handsReady=false});controllers.forEach(c=>c.addEventListener('select',()=>{if(mode==='paint')throwSnowball()}));
+const controllers=[renderer.xr.getController(0),renderer.xr.getController(1)];controllers.forEach(c=>xrRig.add(c));const grips=[renderer.xr.getControllerGrip(0),renderer.xr.getControllerGrip(1)];grips.forEach(g=>xrRig.add(g));const previousHands=[new THREE.Vector3(),new THREE.Vector3()];let handsReady=false;const locomotionVelocity=new THREE.Vector3();let grounded=false;const handContact=[false,false];renderer.xr.addEventListener('sessionstart',()=>{document.body.classList.add('vr-active');xrRig.position.copy(player.position);camera.position.set(0,0,0);handsReady=false;locomotionVelocity.set(0,0,0);notify('VR ready — push off the ice with your flippers to move!')});renderer.xr.addEventListener('sessionend',()=>{document.body.classList.remove('vr-active');xrRig.position.set(0,0,0);camera.position.set(0,2.2,7);handsReady=false;locomotionVelocity.set(0,0,0)});controllers.forEach(c=>c.addEventListener('select',()=>{if(mode==='paint')throwSnowball()}));
 $('#jumpBtn').onclick=()=>hop=4.2;$('#throwBtn').onclick=throwSnowball;
 function setMap(m){scene.background=new THREE.Color(m==='night'?0x111a45:m==='cove'?0x83cbe6:m==='summit'?0xc6dced:0x9cc9e8);scene.fog.color.copy(scene.background);notify('Map changed: '+$('#map').selectedOptions[0].text)}
 $('#map').onchange=e=>setMap(e.target.value);
@@ -123,6 +123,17 @@ modeOptions.forEach((o,i)=>{
  b.position.set(x,.22,z);b.userData.mode=o[1];scene.add(b);computerButtons.push(b);
  const s=signBoard(o[0],'SELECT MODE',new THREE.Vector3(x,.75,z),1.15,.42);s.rotation.x=-.18;
 });
+
+const worldKioskButtons=[];
+const shopFrame=new THREE.Mesh(new THREE.BoxGeometry(4.6,2.8,.22),mat(0x273b62));shopFrame.position.set(0,2,5);scene.add(shopFrame);
+const shopScreen=signBoard('PENGUIN STYLE SHOP','POINT + TRIGGER TO BUY / EQUIP',new THREE.Vector3(0,2,4.84),4.35,2.55);
+const kioskItems=['purple','ocean','gold','ice'];
+kioskItems.forEach((id,i)=>{const item=catalog.find(v=>v.id===id),x=-1.55+(i%2)*3.1,z=5.8+Math.floor(i/2)*1.05;
+ const b=new THREE.Mesh(new THREE.BoxGeometry(1.25,.2,.72),new THREE.MeshStandardMaterial({color:item.color,emissive:item.color,emissiveIntensity:.18}));b.position.set(x,.22,z);b.userData.shop=id;scene.add(b);worldKioskButtons.push(b);
+ const label=signBoard(item.name,'FISH '+item.cost,new THREE.Vector3(x,.9,z),1.8,.62);label.rotation.x=-.25;
+});
+const questBoard=signBoard('DAILY QUEST','VISIT 2 MAP GATES · EARN 75 FISH',new THREE.Vector3(9,2,4),3.8,1.5);
+const ownerBoard=signBoard('PENGUIN STAFF','OWNER POWERS REQUIRE VERIFIED FIRST JOIN',new THREE.Vector3(-9,2,4),4.2,1.5);
 const boardEntries=['1  ICEKING     2450','2  PINGU       1980','3  SNOWFLAKE   1760','4  FROSTY      1520','5  WADDLES     1200'];
 const boardCanvas=document.createElement('canvas');boardCanvas.width=768;boardCanvas.height=512;
 function drawBoard(){
@@ -141,8 +152,9 @@ controllers.forEach((controller,i)=>{
   const origin=new THREE.Vector3(),direction=new THREE.Vector3(0,0,-1);
   controller.getWorldPosition(origin);direction.applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion()));
   raycaster.set(origin,direction);
-  const hit=raycaster.intersectObjects(computerButtons,false)[0];
-  if(hit){selectedWorldMode=hit.object.userData.mode;inWorldMode=selectedWorldMode;computerScreen.material=worldText('MODE: '+selectedWorldMode.toUpperCase(),'SELECTED · WALK THROUGH A MAP GATE');computerScreen.material.needsUpdate=true;}
+  const interactables=[...computerButtons,...worldKioskButtons];
+  const hit=raycaster.intersectObjects(interactables,false)[0];
+  if(hit){if(hit.object.userData.mode){selectedWorldMode=hit.object.userData.mode;inWorldMode=selectedWorldMode;computerScreen.material=worldText('MODE: '+selectedWorldMode.toUpperCase(),'SELECTED · WALK THROUGH A MAP GATE');computerScreen.material.needsUpdate=true;}else if(hit.object.userData.shop){const item=catalog.find(v=>v.id===hit.object.userData.shop);if(item){if(save.owned.includes(item.id)){save.equipped=item.id;applyPenguinColor();persist();shopScreen.material=worldText('EQUIPPED: '+item.name,'YOUR PENGUIN STYLE IS UPDATED');}else if(save.coins>=item.cost){save.coins-=item.cost;save.owned.push(item.id);save.equipped=item.id;applyPenguinColor();persist();shopScreen.material=worldText('PURCHASED: '+item.name,'LOOKING FRESH!');}else shopScreen.material=worldText('NOT ENOUGH FISH','EARN COINS BY PLAYING');shopScreen.material.needsUpdate=true;}}}
  });
 });
 let inWorldMode='lobby',selectedWorldMode='tag',lastPortalJoin=0;
@@ -163,7 +175,28 @@ function updateWorldLobby(dt,xr){
 }
 
 const clock=new THREE.Clock();function animate(){const dt=Math.min(clock.getDelta(),.04),t=clock.elapsedTime,xr=renderer.xr.isPresenting;
- if(!xr){player.visible=false;$('#status').textContent='VR REQUIRED · ENTER IMMERSIVE MODE';}else{player.visible=true;const head=renderer.xr.getCamera(camera),dir=new THREE.Vector3();head.getWorldDirection(dir);yaw=Math.atan2(-dir.x,-dir.z);const handNow=grips.map(g=>{const p=new THREE.Vector3();g.getWorldPosition(p);return p});if(!handsReady){handNow.forEach((p,i)=>previousHands[i].copy(p));handsReady=true}else{for(let i=0;i<handNow.length;i++){const p=handNow[i],prev=previousHands[i];const touchingIce=p.y<.38||prev.y<.38;if(touchingIce){const push=prev.clone().sub(p);push.multiplyScalar(1.12);xrRig.position.add(push)}prev.copy(p)}}xrRig.position.x=THREE.MathUtils.clamp(xrRig.position.x,-29,29);xrRig.position.z=THREE.MathUtils.clamp(xrRig.position.z,-29,29);player.position.copy(xrRig.position);player.position.y=0;player.rotation.y=yaw;}
+ if(!xr){player.visible=false;$('#status').textContent='VR REQUIRED · ENTER IMMERSIVE MODE';}else{player.visible=true;const head=renderer.xr.getCamera(camera),dir=new THREE.Vector3();head.getWorldDirection(dir);yaw=Math.atan2(-dir.x,-dir.z);const handNow=grips.map(g=>{const p=new THREE.Vector3();g.getWorldPosition(p);return p});if(!handsReady){handNow.forEach((p,i)=>previousHands[i].copy(p));handsReady=true}
+ else{
+  let pushSum=new THREE.Vector3();let contacts=0;
+  for(let i=0;i<handNow.length;i++){
+   const p=handNow[i],prev=previousHands[i],delta=prev.clone().sub(p);
+   const touchingFloor=p.y<.42;
+   const touchingWall=Math.abs(p.x)>29.2||Math.abs(p.z)>29.2;
+   if(touchingFloor||touchingWall){
+    const strength=touchingFloor?1.35:1.05;
+    pushSum.addScaledVector(delta,strength);contacts++;handContact[i]=true;
+   }else handContact[i]=false;
+   previousHands[i].copy(p);
+  }
+  if(contacts){pushSum.y=0;locomotionVelocity.add(pushSum);if(contacts===2&&pushSum.length()>.12)locomotionVelocity.y=Math.max(locomotionVelocity.y,.8);}
+ }
+ // Gravity, momentum, ground response and friction.
+ locomotionVelocity.y-=9.8*dt;
+ xrRig.position.addScaledVector(locomotionVelocity,dt);
+ if(xrRig.position.y<0){xrRig.position.y=0;if(locomotionVelocity.y<0)locomotionVelocity.y=0;grounded=true}else grounded=false;
+ const drag=Math.exp(-1.15*dt);locomotionVelocity.x*=drag;locomotionVelocity.z*=drag;
+ if(Math.abs(locomotionVelocity.x)+Math.abs(locomotionVelocity.z)<.015){locomotionVelocity.x=0;locomotionVelocity.z=0;}
+ if(xrRig.position.x<-29||xrRig.position.x>29)locomotionVelocity.x*=-.25;if(xrRig.position.z<-29||xrRig.position.z>29)locomotionVelocity.z*=-.25;xrRig.position.x=THREE.MathUtils.clamp(xrRig.position.x,-29,29);xrRig.position.z=THREE.MathUtils.clamp(xrRig.position.z,-29,29);player.position.copy(xrRig.position);player.position.y=0;player.rotation.y=yaw;}
  player.position.x=THREE.MathUtils.clamp(player.position.x,-29,29);player.position.z=THREE.MathUtils.clamp(player.position.z,-29,29);
  for(const b of bots){b.phase+=dt*b.speed;if(round?.active&&['tag','hide','infection'].includes(mode)&&b.role==='seeker'&&distance(b.mesh,player)<13){const d=player.position.clone().sub(b.mesh.position);d.y=0;if(d.lengthSq()>.01){d.normalize();b.mesh.position.addScaledVector(d,dt*(mode==='infection'?2.5:2.1));b.mesh.rotation.y=Math.atan2(-d.x,-d.z)}}else if(round?.active&&mode==='tag'&&b.role==='wander'){b.mesh.position.x+=Math.sin(b.phase)*dt*.3;b.mesh.position.z+=Math.cos(b.phase*.7)*dt*.25}else{b.mesh.position.x+=Math.sin(b.phase)*dt*.35;b.mesh.position.z+=Math.cos(b.phase*.7)*dt*.3}b.mesh.position.x=THREE.MathUtils.clamp(b.mesh.position.x,-30,30);b.mesh.position.z=THREE.MathUtils.clamp(b.mesh.position.z,-30,30);b.mesh.rotation.y+=dt*.1;}
  for(let i=snowballs.length-1;i>=0;i--){const s=snowballs[i];s.life-=dt;s.vel.y-=9.8*dt;s.mesh.position.addScaledVector(s.vel,dt);let hit=false;for(const b of bots)if(s.mesh.position.distanceTo(b.mesh.position.clone().add(new THREE.Vector3(0,1,0)))<.75){hit=true;paintHits++;gameScore++;$('#gameScore').textContent=gameScore;notify('Snowball hit! +1');break}if(s.life<=0||hit){scene.remove(s.mesh);snowballs.splice(i,1)}}
