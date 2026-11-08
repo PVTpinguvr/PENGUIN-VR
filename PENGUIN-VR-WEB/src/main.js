@@ -63,7 +63,7 @@ const checkpoints=[];for(let i=0;i<5;i++){const a=i/5*Math.PI*2;const ring=new T
 const crown=addMesh(new THREE.TorusGeometry(2.8,.14,8,32),mat(0xffd34d),0,.15,-8);crown.rotation.x=Math.PI/2;crown.visible=false;
 // Desktop / mobile / XR controls
 const keys={};let yaw=0,pitch=0,locked=false,hop=0,mode='lobby',round=null,gameScore=0,gameTime=0,checkpoint=0,paintHits=0;addEventListener('keydown',e=>{keys[e.code]=true;if(['Space','ArrowUp','ArrowDown'].includes(e.code))e.preventDefault()});addEventListener('keyup',e=>keys[e.code]=false);renderer.domElement.addEventListener('click',()=>{if(!renderer.xr.isPresenting&&mode==='paint')throwSnowball();else if(!renderer.xr.isPresenting)renderer.domElement.requestPointerLock?.()});document.addEventListener('pointerlockchange',()=>locked=document.pointerLockElement===renderer.domElement);document.addEventListener('mousemove',e=>{if(locked){yaw-=e.movementX*.002*save.sensitivity;pitch=Math.max(-.8,Math.min(.8,pitch-e.movementY*.002*save.sensitivity))}});
-const controllers=[renderer.xr.getController(0),renderer.xr.getController(1)];controllers.forEach(c=>xrRig.add(c));const grips=[renderer.xr.getControllerGrip(0),renderer.xr.getControllerGrip(1)];grips.forEach(g=>xrRig.add(g));const previousHands=[new THREE.Vector3(),new THREE.Vector3()];let handsReady=false;const locomotionVelocity=new THREE.Vector3();let grounded=false;const handContact=[false,false];renderer.xr.addEventListener('sessionstart',()=>{document.body.classList.add('vr-active');xrRig.position.copy(player.position);camera.position.set(0,0,0);handsReady=false;locomotionVelocity.set(0,0,0);connectPublicRoom();notify('VR ready — push off the ice with your flippers to move!')});renderer.xr.addEventListener('sessionend',()=>{document.body.classList.remove('vr-active');if(netSocket){netSocket.close();netSocket=null}netReady=false;clearRemotePlayers();xrRig.position.set(0,0,0);camera.position.set(0,2.2,7);handsReady=false;locomotionVelocity.set(0,0,0)});controllers.forEach(c=>c.addEventListener('select',()=>{if(mode==='paint')throwSnowball()}));
+const controllers=[renderer.xr.getController(0),renderer.xr.getController(1)];controllers.forEach(c=>xrRig.add(c));const grips=[renderer.xr.getControllerGrip(0),renderer.xr.getControllerGrip(1)];grips.forEach(g=>xrRig.add(g));const previousHands=[new THREE.Vector3(),new THREE.Vector3()];let handsReady=false;const locomotionVelocity=new THREE.Vector3();let grounded=false;const handContact=[false,false];renderer.xr.addEventListener('sessionstart',()=>{document.body.classList.add('vr-active');xrRig.position.set(player.position.x,0,player.position.z);xrRig.rotation.set(0,0,0);camera.position.set(0,0,0);camera.rotation.set(0,0,0);handsReady=false;locomotionVelocity.set(0,0,0);connectPublicRoom();notify('VR ready — push off the ice with your flippers to move!')});renderer.xr.addEventListener('sessionend',()=>{document.body.classList.remove('vr-active');if(netSocket){netSocket.close();netSocket=null}netReady=false;clearRemotePlayers();xrRig.position.set(0,0,0);xrRig.rotation.set(0,0,0);camera.position.set(0,2.2,7);camera.rotation.set(0,0,0);handsReady=false;locomotionVelocity.set(0,0,0)});controllers.forEach(c=>c.addEventListener('select',()=>{if(mode==='paint')throwSnowball()}));
 $('#jumpBtn').onclick=()=>hop=4.2;$('#throwBtn').onclick=throwSnowball;
 function setMap(m){scene.background=new THREE.Color(m==='night'?0x111a45:m==='cove'?0x83cbe6:m==='summit'?0xc6dced:0x9cc9e8);scene.fog.color.copy(scene.background);notify('Map changed: '+$('#map').selectedOptions[0].text)}
 $('#map').onchange=e=>setMap(e.target.value);
@@ -234,20 +234,30 @@ function setPushToTalk(on){pttHeld=on;if(on)enableMic().then(ok=>{if(ok)for(cons
 controllers.forEach(c=>{c.addEventListener('squeezestart',()=>setPushToTalk(true));c.addEventListener('squeezeend',()=>setPushToTalk(false));});
 
 const clock=new THREE.Clock();function animate(){const dt=Math.min(clock.getDelta(),.04),t=clock.elapsedTime,xr=renderer.xr.isPresenting;
- if(!xr){player.visible=false;$('#status').textContent='VR REQUIRED · ENTER IMMERSIVE MODE';}else{player.visible=true;const head=renderer.xr.getCamera(camera),dir=new THREE.Vector3();head.getWorldDirection(dir);yaw=Math.atan2(-dir.x,-dir.z);const handNow=grips.map(g=>{const p=new THREE.Vector3();g.getWorldPosition(p);return p});if(!handsReady){handNow.forEach((p,i)=>previousHands[i].copy(p));handsReady=true}
+ if(!xr){player.visible=false;$('#status').textContent='VR REQUIRED · ENTER IMMERSIVE MODE';}else{player.visible=true;const head=renderer.xr.getCamera(camera),dir=new THREE.Vector3();head.getWorldDirection(dir);yaw=Math.atan2(-dir.x,-dir.z);// Keep hand history in rig-local space so moving the player rig does not cancel the hand stroke.
+ const handNow=grips.map(g=>{const p=new THREE.Vector3();g.getWorldPosition(p);xrRig.worldToLocal(p);return p});
+ if(!handsReady){handNow.forEach((p,i)=>previousHands[i].copy(p));handsReady=true}
  else{
-  let pushSum=new THREE.Vector3();let contacts=0;
+  const pushSum=new THREE.Vector3();let contacts=0;
   for(let i=0;i<handNow.length;i++){
    const p=handNow[i],prev=previousHands[i],delta=prev.clone().sub(p);
-   const touchingFloor=p.y<.42;
-   const touchingWall=Math.abs(p.x)>29.2||Math.abs(p.z)>29.2;
+   // Hands push against the ice when they are near floor level; side boundaries act as walls.
+   const worldHand=p.clone().applyMatrix4(xrRig.matrixWorld);
+   const touchingFloor=p.y<.62;
+   const touchingWall=Math.abs(worldHand.x)>28.5||Math.abs(worldHand.z)>28.5;
    if(touchingFloor||touchingWall){
-    const strength=touchingFloor?1.35:1.05;
-    pushSum.addScaledVector(delta,strength);contacts++;handContact[i]=true;
+    const push=delta.applyQuaternion(xrRig.quaternion);
+    pushSum.add(push);contacts++;handContact[i]=true;
    }else handContact[i]=false;
    previousHands[i].copy(p);
   }
-  if(contacts){pushSum.y=0;locomotionVelocity.add(pushSum);if(contacts===2&&pushSum.length()>.12)locomotionVelocity.y=Math.max(locomotionVelocity.y,.8);}
+  if(contacts){
+   // Convert tracked hand displacement into a frame-rate-independent player impulse.
+   locomotionVelocity.addScaledVector(pushSum,0.9/dt);
+   const horizontal=Math.hypot(locomotionVelocity.x,locomotionVelocity.z);
+   if(horizontal>8){locomotionVelocity.x*=8/horizontal;locomotionVelocity.z*=8/horizontal}
+   locomotionVelocity.y=THREE.MathUtils.clamp(locomotionVelocity.y,-7,7);
+  }
  }
  // Gravity, momentum, ground response and friction.
  locomotionVelocity.y-=9.8*dt;
