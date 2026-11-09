@@ -235,7 +235,7 @@ controllers.forEach(c=>{c.addEventListener('squeezestart',()=>setPushToTalk(true
 
 const clock=new THREE.Clock();function animate(){const dt=Math.min(clock.getDelta(),.04),t=clock.elapsedTime,xr=renderer.xr.isPresenting;
  if(!xr){player.visible=false;$('#status').textContent='VR REQUIRED · ENTER IMMERSIVE MODE';}else{player.visible=true;const head=renderer.xr.getCamera(camera),dir=new THREE.Vector3();head.getWorldDirection(dir);yaw=Math.atan2(-dir.x,-dir.z);// Keep hand history in rig-local space so moving the player rig does not cancel the hand stroke.
- const handNow=controllers.map(c=>{const p=new THREE.Vector3();c.getWorldPosition(p);xrRig.worldToLocal(p);return p});
+ xrRig.updateMatrixWorld(true);const handNow=controllers.map(c=>{const p=new THREE.Vector3();c.getWorldPosition(p);xrRig.worldToLocal(p);return p});
  if(!handsReady){handNow.forEach((p,i)=>previousHands[i].copy(p));handsReady=true}
  else{
   const pushSum=new THREE.Vector3();let contacts=0;
@@ -245,7 +245,7 @@ const clock=new THREE.Clock();function animate(){const dt=Math.min(clock.getDelt
    const worldNow=p.clone().applyMatrix4(xrRig.matrixWorld);
    const worldPrev=prev.clone().applyMatrix4(xrRig.matrixWorld);
    // Floor contact: only count a hand stroke while the tracked hand is close to the floor.
-   const touchingFloor=p.y<.68;
+   const touchingFloor=p.y<1.05;
    // Wall/obstacle contact: detect a controller stroke crossing a solid scene mesh.
    let touchingWall=false;
    if(strokeLength>.012){
