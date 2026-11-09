@@ -290,5 +290,5 @@ const clock=new THREE.Clock();function animate(){const dt=Math.min(clock.getDelt
  for(const [id,v] of remotePlayers){v.mesh.position.lerp(v.target,Math.min(1,dt*12));const a=document.getElementById('voice-'+id);if(a){const d=v.mesh.position.distanceTo(xrRig.position);a.volume=THREE.MathUtils.clamp(1-d/18,0,1);}}updateWorldLobby(dt,xr);player.userData.wings.forEach((w,i)=>{w.rotation.z=(i===0?-.28:.28)+Math.sin(t*7+(i* Math.PI))*0.12});if(!xr)$('#status').textContent='VR REQUIRED';else $('#status').textContent='QUEST VR · IMMERSIVE';renderer.render(scene,camera)}renderer.setAnimationLoop(animate);
 const vr=VRButton.createButton(renderer);vr.id='vrButton';vr.textContent='ENTER QUEST VR';document.body.appendChild(vr);
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
-if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
+if('serviceWorker'in navigator&&location.protocol.startsWith('http')&&location.pathname.includes('/PENGUIN-VR-WEB/'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
 refreshUI();$('#status').textContent='VR REQUIRED';
